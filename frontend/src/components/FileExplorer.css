@@ -1,0 +1,56 @@
+/* frontend/src/components/FileExplorer.css */
+.file-explorer {
+    width: 250px;
+    background-color: #252526;
+    border-right: 1px solid #3e3e42;
+    padding: 10px;
+    height: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+    color: #d4d4d4;
+}
+
+.file-explorer h3 {
+    margin-top: 0;
+    font-size: 1.1em;
+    color: #d4d4d4;
+    margin-bottom: 10px;
+}
+
+.file-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.file-list li {
+    padding: 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #3e3e42;
+    font-family: monospace;
+    color: #d4d4d4;
+}
+
+.file-list li:hover {
+    background-color: #37373d;
+}
+
+.refresh-btn {
+    margin-bottom: 10px;
+    padding: 5px 10px;
+    cursor: pointer;
+    background-color: #0e639c;
+    color: white;
+    border: none;
+    border-radius: 2px;
+}
+
+.refresh-btn:hover {
+    background-color: #1177bb;
+}
+
+.error {
+    color: #f48771;
+    font-size: 0.9em;
+    margin-bottom: 10px;
+}

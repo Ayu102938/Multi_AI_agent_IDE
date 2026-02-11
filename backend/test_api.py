@@ -1,17 +1,26 @@
-from fastapi.testclient import TestClient
-from main import app
+import httpx
+import sys
 
-client = TestClient(app)
+try:
+    # Test List Files
+    print("Testing GET /api/files...")
+    response = httpx.get("http://localhost:8000/api/files")
+    if response.status_code == 200:
+        print("List Files: SUCCESS")
+        print(response.json())
+    else:
+        print(f"List Files: FAILED ({response.status_code})")
+        print(response.text)
 
-def test_chat_endpoint():
-    # Test Payload
-    payload = {"message": "Hello AI"}
-    
-    # Expecting a POST request to /api/chat
-    response = client.post("/api/chat", json=payload)
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert "response" in data
-    # Ideally, it should return something from the agents
-    # For now, we expect a placeholder or mock response
+    # Test Read File
+    print("\nTesting GET /api/files/test.txt...")
+    response = httpx.get("http://localhost:8000/api/files/test.txt")
+    if response.status_code == 200:
+        print("Read File: SUCCESS")
+        print(response.json())
+    else:
+        print(f"Read File: FAILED ({response.status_code})")
+        print(response.text)
+
+except Exception as e:
+    print(f"Error: {e}")

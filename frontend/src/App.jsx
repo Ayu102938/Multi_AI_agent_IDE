@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import axios from 'axios'
+import FileExplorer from './components/FileExplorer'
 import './App.css'
 
 function App() {
@@ -51,6 +52,18 @@ function App() {
     }
   }
 
+  const handleFileSelect = async (filename) => {
+    try {
+      const response = await axios.get(`http://localhost:8000/api/files/${filename}`);
+      if (response.data.content) {
+        setCode(response.data.content);
+      }
+    } catch (error) {
+      console.error("Error reading file:", error);
+      setOutput(`Failed to read file: ${error.message}`);
+    }
+  }
+
   const handleSendMessage = async () => {
     if (!message.trim()) return;
 
@@ -77,6 +90,7 @@ function App() {
         </button>
       </div>
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <FileExplorer onFileSelect={handleFileSelect} />
         <div style={{ width: '300px', backgroundColor: '#252526', color: '#d4d4d4', padding: '10px', display: 'flex', flexDirection: 'column', borderRight: '1px solid #3e3e42' }}>
           <h3>Chat</h3>
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>

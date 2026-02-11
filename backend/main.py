@@ -11,11 +11,19 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    # Ensure workspace directory exists
+    workspace_path = Path(".") / "workspace"
+    if not workspace_path.exists():
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        print(f"Workspace directory initialized at: {workspace_path.absolute()}")
 
 from pydantic import BaseModel
 
@@ -163,17 +171,56 @@ def run_code(request: RunRequest):
     code = request.code
     output_buffer = StringIO()
 
+    # Get absolute path to workspace
+    workspace_path = (Path(".") / "workspace").resolve()
+    str_workspace_path = str(workspace_path)
+
     try:
         # Redirect stdout to capture print statements
         with contextlib.redirect_stdout(output_buffer):
-            # Execute the code
-            exec(code, {'__name__': '__main__'})
+            # Add workspace to sys.path if not present
+            path_added = False
+            if str_workspace_path not in sys.path:
+                sys.path.insert(0, str_workspace_path)
+                path_added = True
+            
+            try:
+                # Execute the code
+                exec(code, {'__name__': '__main__'})
+            finally:
+                # Remove workspace from sys.path if we added it
+                if path_added and str_workspace_path in sys.path:
+                    sys.path.remove(str_workspace_path)
         
         result = output_buffer.getvalue()
         return {"status": "success", "output": result}
         
     except Exception as e:
         return {"status": "error", "output": str(e)}
+
+@app.get("/api/files")
+def list_files():
+    """List all files in the workspace."""
+    workspace_path = Path(".") / "workspace"
+    files = []
+    if workspace_path.exists():
+        for file_path in workspace_path.iterdir():
+            if file_path.is_file():
+                files.append(file_path.name)
+    return {"files": files}
+
+@app.get("/api/files/{filename}")
+def read_file(filename: str):
+    """Read a specific file from the workspace."""
+    safe_filename = Path(filename).name # Prevent directory traversal
+    file_path = Path(".") / "workspace" / safe_filename
+    if not file_path.exists():
+        return {"error": "File not found"}
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        return {"content": content}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/")
 def read_root():
