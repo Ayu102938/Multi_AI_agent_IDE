@@ -45,7 +45,7 @@ def run_agents(message: str):
         
         # Check for API Key (Simple check for demo purposes)
         import os
-        if not os.getenv("OPENAI_API_KEY") and not os.getenv("CREWAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
+        if not os.getenv("OPENAI_API_KEY") and not os.getenv("CREWAI_API_KEY") and not os.getenv("GOOGLE_API_KEY") and not os.getenv("ZHIPUAI_API_KEY"):
             # Mock execution if no key is found to demonstrate UI
             agent_logger.log("System", "Note: No API Key found in environment. Running in Demo Mode.", "warning")
             asyncio.run(mock_agent_execution(message))
@@ -56,9 +56,6 @@ def run_agents(message: str):
         
         # Custom callback for steps
         def step_callback(step_output):
-            # step_output is a valid CrewAI step object
-            # We try to extract thought/result
-            # Note: CrewAI step objects might vary by version, robust check:
             thought = getattr(step_output, 'thought', '')
             result = getattr(step_output, 'result', '')
             
@@ -67,7 +64,13 @@ def run_agents(message: str):
             if result:
                 agent_logger.log("Agent", f"Action: {result}", "info")
             if not thought and not result:
-                agent_logger.log("Agent", f"Working... {str(step_output)[:100]}", "info")
+                agent_logger.log("Agent", f"Working... {str(step_output)}", "info")
+
+        # Task callback - fires when each task completes
+        def make_task_callback(task_name):
+            def task_callback(output):
+                agent_logger.log(task_name, f"Task completed: {str(output)}", "success")
+            return task_callback
 
         # Define Agents
         architect = agents["architect"]
@@ -76,11 +79,12 @@ def run_agents(message: str):
 
         # Define Tasks
         # 1. Architect: Design the solution
+        agent_logger.log("Architect", "Starting design phase...", "info")
         design_task = Task(
             description=f"ユーザーの要望: '{message}'\n\nこの要望を満たすアプリケーションのアーキテクチャ、必要なファイル構成、および実装ステップを設計してください。",
             expected_output="ファイル構成と実装詳細を含む設計書",
             agent=architect,
-            callback=step_callback
+            callback=make_task_callback("Architect")
         )
 
         # 2. Coder: Implement the code
@@ -89,16 +93,16 @@ def run_agents(message: str):
             expected_output="実装されたソースコード",
             agent=coder,
             context=[design_task],
-            callback=step_callback
+            callback=make_task_callback("Coder")
         )
 
-        # 3. Tester: Verify the code (Mock testing for now as we can't run it yet)
+        # 3. Tester: Verify the code
         testing_task = Task(
             description="コーダーが作成したコードをレビューし、論理的な誤りやセキュリティ上の問題がないか確認してください。",
             expected_output="コードレビューレポートと修正案（もしあれば）",
             agent=tester,
             context=[coding_task],
-            callback=step_callback
+            callback=make_task_callback("Tester")
         )
 
         # Create Crew
@@ -107,7 +111,8 @@ def run_agents(message: str):
             tasks=[design_task, coding_task, testing_task],
             process=Process.sequential,
             verbose=True,
-            memory=False # Explicitly disable memory to prevent OpenAI embedding requirement
+            step_callback=step_callback,
+            memory=False
         )
         
         agent_logger.log("System", "Crew assembling...", "info")
@@ -125,7 +130,8 @@ def run_agents(message: str):
             agent_logger.log("System", "Code extracted and sent to editor.", "success")
         
     except Exception as e:
-        agent_logger.log("System", f"Error during execution: {str(e)}", "error")
+        import traceback
+        agent_logger.log("System", f"Error during execution: {str(e)}\n{traceback.format_exc()}", "error")
 
 async def mock_agent_execution(message: str):
     """

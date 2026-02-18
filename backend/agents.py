@@ -1,6 +1,5 @@
-from crewai import Agent
+from crewai import Agent, LLM
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
 from crewai_tools import FileReadTool, FileWriterTool
 
 # Define workspace path (ensure it matches main.py)
@@ -11,17 +10,26 @@ file_read_tool = FileReadTool(base_folder=workspace_path)
 file_write_tool = FileWriterTool(base_folder=workspace_path)
 
 def create_agents():
-    # Helper to create LLM
+    # Helper to create LLM - Priority: ZhiPu AI GLM > Google Gemini > OpenAI
     llm = None
     
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if api_key:
-        # Use LiteLLM string format to bypass OpenAI dependency issues in CrewAI
-        # and ensuring correct model mapping.
+    zhipuai_key = os.getenv("ZHIPUAI_API_KEY")
+    google_key = os.getenv("GOOGLE_API_KEY")
+    
+    if zhipuai_key:
+        # Use ZhiPu AI GLM via OpenAI-compatible API
+        llm = LLM(
+            model="GLM-4.5-Flash",
+            api_key=zhipuai_key,
+            base_url="https://open.bigmodel.cn/api/paas/v4/"
+        )
+        
+    elif google_key:
+        # Use Google Gemini as fallback
         llm = "gemini/gemini-flash-latest"
         
     elif os.getenv("OPENAI_API_KEY"):
-        # CrewAI default, but explicit if needed
+        # CrewAI default (OpenAI)
         pass
     
     # Common config (Explicitly disable memory to prevent OpenAI dependency)
