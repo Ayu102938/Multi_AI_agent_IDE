@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-env_path = Path(".") / ".env"
-load_dotenv(dotenv_path=env_path)
+# Absolute path to .env file relative to this script
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 app = FastAPI()
 
@@ -20,7 +21,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     # Ensure workspace directory exists
-    workspace_path = Path(".") / "workspace"
+    workspace_path = Path(__file__).resolve().parent / "workspace"
     if not workspace_path.exists():
         workspace_path.mkdir(parents=True, exist_ok=True)
         print(f"Workspace directory initialized at: {workspace_path.absolute()}")
@@ -35,6 +36,140 @@ from crewai import Crew, Process, Task
 
 class ChatRequest(BaseModel):
     message: str
+
+import re
+
+def extract_and_save_code_blocks(text: str, workspace_path: Path) -> list:
+    """
+    Extract code blocks from agent text output and save them as files.
+    This is a fallback for when agents output code as text
+    instead of using File Writer Tool.
+    
+    Returns list of saved filenames.
+    """
+    saved_files = []
+    
+    # Find all code blocks with language hints
+    pattern = r'```(\w+)?\n(.*?)```'
+    blocks = list(re.finditer(pattern, text, re.DOTALL))
+    
+    if not blocks:
+        return saved_files
+    
+    # Map of language to file extension
+    ext_map = {
+        'python': '.py',
+        'py': '.py',
+        'javascript': '.js',
+        'js': '.js',
+        'typescript': '.ts',
+        'ts': '.ts',
+        'html': '.html',
+        'css': '.css',
+        'json': '.json',
+        'yaml': '.yaml',
+        'yml': '.yml',
+        'markdown': '.md',
+        'md': '.md',
+        'txt': '.txt',
+        'sh': '.sh',
+        'bash': '.sh',
+        'sql': '.sql',
+    }
+    
+    for i, match in enumerate(blocks):
+        lang = (match.group(1) or '').lower()
+        content = match.group(2).strip()
+        
+        if not content or lang in ('', 'text', 'plaintext'):
+            continue
+        
+        # Skip non-code blocks (e.g. file structure diagrams)
+        if lang not in ext_map:
+            continue
+        
+        ext = ext_map[lang]
+        
+        # Try to detect filename from content
+        filename = None
+        
+        # Method 1: Look for filename in comments at the top
+        # e.g. "# filename: calculator.py" or "# calculator.py"
+        first_lines = content.split('\n')[:5]
+        for line in first_lines:
+            # Match patterns like: # calculator.py, # filename: calculator.py
+            fname_match = re.search(r'#\s*(?:filename:\s*)?(\w[\w\-]*\.\w+)', line, re.IGNORECASE)
+            if fname_match:
+                candidate = fname_match.group(1)
+                # Verify it has a reasonable extension
+                if '.' in candidate:
+                    filename = candidate
+                    break
+        
+        # Method 2: Look for module docstring hints
+        if not filename:
+            for line in first_lines:
+                # Match: """Calculator module...""" -> calculator.py
+                doc_match = re.search(r'["\']+(.*?module.*?|.*?for (?:the )?(\w+))', line, re.IGNORECASE)
+                if doc_match:
+                    break
+        
+        # Method 3: Look at text before the code block for filename
+        if not filename:
+            pre_text = text[:match.start()]
+            # Look for ### 3.1 main.py or similar headings
+            heading_match = re.findall(r'#+\s+(?:\d+\.?\d*\s+)?(\w[\w\-]*\.\w+)', pre_text)
+            if heading_match:
+                filename = heading_match[-1]  # Take the most recent match
+        
+        # Method 4: Look for "file: X" or "save as X" patterns before block
+        if not filename:
+            pre_text_short = text[max(0, match.start()-200):match.start()]
+            save_match = re.search(r'(?:file|save|create|ファイル)[\s:]*[`"]?(\w[\w\-]*\.\w+)', pre_text_short, re.IGNORECASE)
+            if save_match:
+                filename = save_match.group(1)
+        
+        # Fallback: generate a filename
+        if not filename:
+            # Try to detect from class/function names
+            class_match = re.search(r'class\s+(\w+)', content)
+            func_match = re.search(r'def\s+(\w+)', content)
+            
+            if class_match and ext == '.py':
+                # CamelCase to snake_case
+                name = class_match.group(1)
+                snake = re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+                filename = f"{snake}{ext}"
+            elif func_match and func_match.group(1) == 'main' and ext == '.py':
+                filename = f"main{ext}"
+            else:
+                filename = f"code_{i+1}{ext}"
+        
+        if filename:
+            # Clean up filename: strip absolute paths, current dir prefix, and "workspace/" prefix
+            filename = filename.replace('\\', '/')
+            filename = re.sub(r'^(\./|/|workspace/|/workspace/)', '', filename, flags=re.IGNORECASE)
+            # Ensure it's just a relative path now
+            filename = os.path.normpath(filename).replace('\\', '/')
+            if filename.startswith('../') or filename.startswith('/'):
+                 filename = os.path.basename(filename) # Safety: no traversal
+
+        # Don't overwrite if file already exists and has more content
+        filepath = workspace_path / filename
+        if filepath.exists():
+            existing_size = filepath.stat().st_size
+            if existing_size > 0 and existing_size >= len(content):
+                continue  # Skip - existing file is larger or equal
+        
+        # Save the file
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(content, encoding='utf-8')
+            saved_files.append(filename)
+        except Exception as e:
+            agent_logger.log("System", f"Failed to auto-save {filename}: {e}", "error")
+    
+    return saved_files
 
 def run_agents(message: str):
     """
@@ -70,6 +205,19 @@ def run_agents(message: str):
         def make_task_callback(task_name):
             def task_callback(output):
                 agent_logger.log(task_name, f"Task completed: {str(output)}", "success")
+                
+                # Post-process Coder output: extract code blocks and save to workspace
+                if task_name == "Coder":
+                    workspace_path = Path(__file__).resolve().parent / "workspace"
+                    saved = extract_and_save_code_blocks(str(output), workspace_path)
+                    if saved:
+                        agent_logger.log("System", 
+                            f"Auto-saved {len(saved)} file(s) from Coder output: {', '.join(saved)}", 
+                            "success")
+                    else:
+                        agent_logger.log("System", 
+                            "Note: No new files auto-saved (files may already exist from Tool usage).", 
+                            "info")
             return task_callback
 
         # Define Agents
@@ -81,25 +229,55 @@ def run_agents(message: str):
         # 1. Architect: Design the solution
         agent_logger.log("Architect", "Starting design phase...", "info")
         design_task = Task(
-            description=f"ユーザーの要望: '{message}'\n\nこの要望を満たすアプリケーションのアーキテクチャ、必要なファイル構成、および実装ステップを設計してください。",
-            expected_output="ファイル構成と実装詳細を含む設計書",
+            description=(
+                f"ユーザーの要望: '{message}'\n\n"
+                "この要望を満たすために必要なファイル構成と実装方針を設計してください。\n\n"
+                "【重要】シンプルさを最優先すること。\n"
+                "- シンプルな要望には1〜2ファイルで十分です。過剰な設計は不要です。\n"
+                "- config.py, utils.py, tests/ などは本当に必要な場合のみ含めてください。\n"
+                "- 「シンプルなコード」と言われたら、1ファイルで完結させてください。\n\n"
+                "出力には以下を含めてください：\n"
+                "- 作成すべきファイル名の一覧\n"
+                "- 各ファイルの役割と概要"
+            ),
+            expected_output="ファイル構成と実装詳細を含む簡潔な設計書",
             agent=architect,
             callback=make_task_callback("Architect")
         )
 
         # 2. Coder: Implement the code
         coding_task = Task(
-            description="アーキテクトの設計に基づいて、実際に動作するコードを記述してください。すべての必要なファイル（main.py, requirements.txtなど）の内容を提供してください。",
-            expected_output="実装されたソースコード",
+            description=(
+                "アーキテクトの設計に基づいて、実際に動作するコードを実装してください。\n\n"
+                "【絶対に守るルール】\n"
+                "コードは必ず File Writer Tool を使ってファイルに保存してください。\n"
+                "チャットにコードを貼り付けるだけでは不十分です。\n\n"
+                "【手順】\n"
+                "1. 設計書を確認する\n"
+                "2. 各ファイルのコードを作成する\n"
+                "3. File Writer Tool で各ファイルを保存する（filename, content, overwrite='true' を指定）\n"
+                "4. 最終出力に、保存したファイル名の一覧を記載する\n\n"
+                "【出力例】\n"
+                "以下のファイルをワークスペースに保存しました：\n"
+                "- example.py: メインプログラム\n"
+                "- utils.py: ユーティリティ関数"
+            ),
+            expected_output="File Writer Toolで保存したファイル名一覧と実装内容の要約",
             agent=coder,
             context=[design_task],
             callback=make_task_callback("Coder")
         )
 
-        # 3. Tester: Verify the code
+        # 3. Tester: Review the code
         testing_task = Task(
-            description="コーダーが作成したコードをレビューし、論理的な誤りやセキュリティ上の問題がないか確認してください。",
-            expected_output="コードレビューレポートと修正案（もしあれば）",
+            description=(
+                "コーダーが作成したコードをレビューしてください。\n\n"
+                "【手順】\n"
+                "1. File Reader Tool でワークスペース内のファイルを読み込む\n"
+                "2. コードの論理的な誤り、セキュリティの問題、改善点を確認する\n"
+                "3. レビュー結果を出力する"
+            ),
+            expected_output="コードレビューレポートと改善提案",
             agent=tester,
             context=[coding_task],
             callback=make_task_callback("Tester")
@@ -120,9 +298,15 @@ def run_agents(message: str):
         agent_logger.log("System", f"Workflow complete!", "success")
         agent_logger.log("Final Output", str(result), "success")
         
-        # Extract code from result (Naive approach for Python blocks)
+        # List workspace files as summary
+        workspace_path = (Path(__file__).resolve().parent / "workspace")
+        if workspace_path.exists():
+            ws_files = [f.name for f in workspace_path.iterdir() if f.is_file() and f.stat().st_size > 0]
+            if ws_files:
+                agent_logger.log("System", f"Workspace files: {', '.join(ws_files)}", "info")
+        
+        # Send first Python code block to editor (from any task output)
         result_str = str(result)
-        import re
         code_match = re.search(r'```python\n(.*?)```', result_str, re.DOTALL)
         if code_match:
             code = code_match.group(1).strip()
@@ -164,6 +348,12 @@ def get_activity(after: str = None):
 class RunRequest(BaseModel):
     code: str
 
+@app.post("/api/reset_logs")
+async def reset_logs():
+    """Clear all agent activity logs."""
+    agent_logger.clear()
+    return {"status": "success", "message": "Logs cleared"}
+
 @app.post("/api/run")
 def run_code(request: RunRequest):
     """
@@ -178,7 +368,7 @@ def run_code(request: RunRequest):
     output_buffer = StringIO()
 
     # Get absolute path to workspace
-    workspace_path = (Path(".") / "workspace").resolve()
+    workspace_path = (Path(__file__).resolve().parent / "workspace").resolve()
     str_workspace_path = str(workspace_path)
 
     try:

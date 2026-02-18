@@ -1,0 +1,2 @@
+# Requirements for the file management system
+# No external dependencies required for basic file operations
