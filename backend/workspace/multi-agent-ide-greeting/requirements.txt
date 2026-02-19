@@ -1,2 +1,0 @@
-# Multi-Agent IDE Greeting Application Dependencies
-# This application uses only standard library, so no external dependencies are required

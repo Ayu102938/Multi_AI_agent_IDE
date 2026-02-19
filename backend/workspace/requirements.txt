@@ -1,3 +1,0 @@
-# This application uses only standard Python libraries,
-# so no external dependencies are required.
-# Python 3.6+ is required.

@@ -42,7 +42,7 @@ def create_agents():
         
     elif google_key:
         # Use Google Gemini as fallback
-        llm = "gemini/gemini-flash-latest"
+        llm = "gemini/gemini-2.0-flash"
         
     elif os.getenv("OPENAI_API_KEY"):
         # CrewAI default (OpenAI)

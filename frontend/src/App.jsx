@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import axios from 'axios'
 import FileExplorer from './components/FileExplorer'
+import TerminalComponent from './components/Terminal'
 import './App.css'
 
 function App() {
   const [code, setCode] = useState('// Type your code here')
   const [output, setOutput] = useState('')
   const [message, setMessage] = useState('')
+  const [inputVal, setInputVal] = useState('') // User input for running code
   const [chatHistory, setChatHistory] = useState([])
   const [activityLogs, setActivityLogs] = useState([])
+  const [isProcessing, setIsProcessing] = useState(false)
 
   // Poll for activity logs
   useEffect(() => {
@@ -29,6 +32,16 @@ function App() {
           if (codeLog) {
             setCode(codeLog.message);
           }
+
+          // Check for completion
+          const completionLog = newLogs.find(log =>
+            (log.role === 'System' && (log.message.includes('Workflow complete!') || log.message.includes('Error during execution'))) ||
+            log.message.includes('All tasks completed (Demo)')
+          );
+
+          if (completionLog) {
+            setIsProcessing(false);
+          }
         }
       } catch (error) {
         console.error("Failed to fetch activity logs", error);
@@ -41,7 +54,10 @@ function App() {
   const handleRunCode = async () => {
     setOutput("Running...");
     try {
-      const response = await axios.post('http://localhost:8000/api/run', { code: code });
+      const response = await axios.post('http://localhost:8000/api/run', {
+        code: code,
+        input: inputVal
+      });
       if (response.data.status === 'success') {
         setOutput(response.data.output);
       } else {
@@ -67,6 +83,8 @@ function App() {
   const handleSendMessage = async () => {
     if (!message.trim()) return;
 
+    setIsProcessing(true);
+
     const newUserMsg = { role: 'user', content: message };
     setChatHistory(prev => [...prev, newUserMsg]);
     setMessage('');
@@ -78,6 +96,7 @@ function App() {
     } catch (error) {
       const errorMsg = { role: 'system', content: `Error: ${error.message}` };
       setChatHistory(prev => [...prev, errorMsg]);
+      setIsProcessing(false);
     }
   }
 
@@ -115,27 +134,53 @@ function App() {
               style={{ flex: 1, padding: '5px', borderRadius: '4px', border: 'none' }}
               placeholder="Ask AI..."
             />
-            <button onClick={handleSendMessage} style={{ padding: '5px 10px', backgroundColor: '#0e639c', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Send</button>
+            <button
+              onClick={handleSendMessage}
+              disabled={isProcessing}
+              style={{
+                padding: '5px 10px',
+                backgroundColor: isProcessing ? '#444' : '#0e639c',
+                color: isProcessing ? '#888' : 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: isProcessing ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Send
+            </button>
           </div>
         </div>
-        <div style={{ flex: 1 }}>
-          <Editor
-            height="100%"
-            defaultLanguage="python"
-            theme="vs-dark"
-            value={code}
-            onChange={(value) => setCode(value)}
-          />
-        </div>
-        <div style={{ width: '300px', backgroundColor: '#252526', color: '#d4d4d4', padding: '10px', borderLeft: '1px solid #3e3e42', overflowY: 'auto' }}>
-          <h3>Output</h3>
-          <pre>{output}</pre>
+
+        {/* Main Content Area: Editor + Terminal */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1 }}>
+            <Editor
+              height="100%"
+              defaultLanguage="python"
+              theme="vs-dark"
+              value={code}
+              onChange={(value) => setCode(value)}
+            />
+          </div>
+          {/* Terminal Area */}
+          <div style={{ height: '30%', minHeight: '200px', borderTop: '1px solid #3e3e42', backgroundColor: '#1e1e1e' }}>
+            <div style={{ padding: '5px 10px', backgroundColor: '#252526', color: '#ccc', fontSize: '12px', borderBottom: '1px solid #3e3e42', display: 'flex', justifyContent: 'space-between' }}>
+              <span>TERMINAL</span>
+              {/* Optional: Add clear button or status here */}
+            </div>
+            <div style={{ height: 'calc(100% - 28px)' }}>
+              <TerminalComponent />
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Activity Log Panel */}
       <div style={{ height: '150px', backgroundColor: '#1e1e1e', color: '#ccc', borderTop: '1px solid #3e3e42', padding: '10px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px' }}>
-        <h4 style={{ margin: '0 0 5px 0' }}>Agent Activity Log</h4>
+        <h4 style={{ margin: '0 0 5px 0', display: 'flex', alignItems: 'center' }}>
+          Agent Activity Log
+          {isProcessing && <span style={{ marginLeft: '10px', fontSize: '0.9em', color: '#4ec9b0', display: 'flex', alignItems: 'center' }}><span className="spinner"></span> Thinking...</span>}
+        </h4>
         {activityLogs.map((log, index) => (
           <div key={index} style={{ marginBottom: '2px' }}>
             <span style={{ color: '#569cd6' }}>[{log.timestamp.split('T')[1].split('.')[0]}]</span>{' '}
@@ -151,3 +196,4 @@ function App() {
 }
 
 export default App
+

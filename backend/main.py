@@ -347,6 +347,7 @@ def get_activity(after: str = None):
 
 class RunRequest(BaseModel):
     code: str
+    input: str = ""  # Optional input string
 
 @app.post("/api/reset_logs")
 async def reset_logs():
@@ -365,6 +366,7 @@ def run_code(request: RunRequest):
     import contextlib
 
     code = request.code
+    input_str = request.input
     output_buffer = StringIO()
 
     # Get absolute path to workspace
@@ -373,7 +375,11 @@ def run_code(request: RunRequest):
 
     try:
         # Redirect stdout to capture print statements
+        # Redirect stdin to provide input
         with contextlib.redirect_stdout(output_buffer):
+            # Prepare stdin
+            sys.stdin = StringIO(input_str)
+            
             # Add workspace to sys.path if not present
             path_added = False
             if str_workspace_path not in sys.path:
@@ -387,11 +393,15 @@ def run_code(request: RunRequest):
                 # Remove workspace from sys.path if we added it
                 if path_added and str_workspace_path in sys.path:
                     sys.path.remove(str_workspace_path)
+                # Reset stdin
+                sys.stdin = sys.__stdin__
         
         result = output_buffer.getvalue()
         return {"status": "success", "output": result}
         
     except Exception as e:
+        # Reset stdin in case of error
+        sys.stdin = sys.__stdin__
         return {"status": "error", "output": str(e)}
 
 @app.get("/api/files")
@@ -418,6 +428,44 @@ def read_file(filename: str):
     except Exception as e:
         return {"error": str(e)}
 
+@app.delete("/api/files/{filename}")
+def delete_file(filename: str):
+    """Delete a specific file from the workspace."""
+    safe_filename = Path(filename).name # Prevent directory traversal
+    file_path = Path(".") / "workspace" / safe_filename
+    if not file_path.exists():
+        return {"error": "File not found"}
+    try:
+        file_path.unlink()
+        return {"status": "success", "message": f"Deleted {filename}"}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/")
 def read_root():
     return {"status": "ok"}
+
+from fastapi import WebSocket, WebSocketDisconnect
+# Import TerminalManager from the newly created file
+# Ensure terminal_manager.py is in the same directory or PYTHONPATH
+try:
+    from terminal_manager import TerminalManager
+except ImportError:
+    # Fallback if running from a different context, though safe_tools implies usage of sys.path
+    import sys
+    sys.path.append(str(Path(__file__).parent))
+    from terminal_manager import TerminalManager
+
+@app.websocket("/api/ws/terminal")
+async def websocket_terminal(websocket: WebSocket):
+    manager = TerminalManager()
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.write(data)
+    except WebSocketDisconnect:
+        await manager.disconnect()
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        await manager.disconnect()

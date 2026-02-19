@@ -9,6 +9,8 @@ function FileExplorer({ onFileSelect }) {
 
     useEffect(() => {
         fetchFiles();
+        const interval = setInterval(fetchFiles, 5000); // Poll every 5 seconds
+        return () => clearInterval(interval);
     }, []);
 
     const fetchFiles = async () => {
@@ -21,6 +23,19 @@ function FileExplorer({ onFileSelect }) {
         }
     };
 
+    const handleDelete = async (e, filename) => {
+        e.stopPropagation(); // Prevent file selection when clicking delete
+        if (!window.confirm(`Are you sure you want to delete ${filename}?`)) return;
+
+        try {
+            await axios.delete(`http://localhost:8000/api/files/${filename}`);
+            fetchFiles(); // Refresh list immediately
+        } catch (err) {
+            console.error("Error deleting file:", err);
+            alert("Failed to delete file");
+        }
+    };
+
     return (
         <div className="file-explorer">
             <h3>Workspace Files</h3>
@@ -28,8 +43,15 @@ function FileExplorer({ onFileSelect }) {
             <button onClick={fetchFiles} className="refresh-btn">Refresh</button>
             <ul className="file-list">
                 {files.map((file) => (
-                    <li key={file} onClick={() => onFileSelect(file)}>
-                        {file}
+                    <li key={file} onClick={() => onFileSelect(file)} className="file-item">
+                        <span className="file-name">{file}</span>
+                        <button
+                            className="delete-btn"
+                            onClick={(e) => handleDelete(e, file)}
+                            title="Delete file"
+                        >
+                            ×
+                        </button>
                     </li>
                 ))}
             </ul>
