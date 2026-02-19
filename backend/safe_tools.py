@@ -40,6 +40,10 @@ class SafeFileWriterTool(BaseTool):
             if isinstance(overwrite, str):
                 overwrite = overwrite.lower() in ("y", "yes", "t", "true", "on", "1")
 
+            # Handle "null" or "None" string for directory
+            if isinstance(directory, str) and directory.lower() in ("null", "none"):
+                directory = None
+
             # Resolve the workspace absolute path
             workspace_abs = os.path.abspath(self.workspace_path)
 

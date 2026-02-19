@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import axios from 'axios'
 import FileExplorer from './components/FileExplorer'
@@ -14,33 +14,56 @@ function App() {
   const [activityLogs, setActivityLogs] = useState([])
   const [isProcessing, setIsProcessing] = useState(false)
 
+  // Use a Ref to store the latest timestamp to avoid re-creating the interval
+  const lastTimestampRef = useRef(null);
+
   // Poll for activity logs
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const lastLog = activityLogs[activityLogs.length - 1];
-        const timestamp = lastLog ? lastLog.timestamp : null;
+        const timestamp = lastTimestampRef.current;
         const url = timestamp ? `http://localhost:8000/api/activity?after=${timestamp}` : 'http://localhost:8000/api/activity';
 
         const response = await axios.get(url);
         if (response.data.logs && response.data.logs.length > 0) {
           const newLogs = response.data.logs;
-          setActivityLogs(prev => [...prev, ...newLogs]);
 
-          // Check for code updates
-          const codeLog = newLogs.find(log => log.type === 'code');
-          if (codeLog) {
-            setCode(codeLog.message);
+          let hasNew = false;
+          // De-duplicate in place if needed, but timestamp filtering should handle it.
+          // Still good to update the ref.
+          const lastLog = newLogs[newLogs.length - 1];
+          if (lastLog) {
+            lastTimestampRef.current = lastLog.timestamp;
+            hasNew = true;
           }
 
-          // Check for completion
-          const completionLog = newLogs.find(log =>
-            (log.role === 'System' && (log.message.includes('Workflow complete!') || log.message.includes('Error during execution'))) ||
-            log.message.includes('All tasks completed (Demo)')
-          );
+          if (hasNew) {
+            setActivityLogs(prev => {
+              // Double check for duplicates
+              const existingIds = new Set(prev.map(l => l.timestamp));
+              const uniqueNew = newLogs.filter(l => !existingIds.has(l.timestamp));
+              if (uniqueNew.length === 0) return prev;
 
-          if (completionLog) {
-            setIsProcessing(false);
+              // Helper to check for completion within the update
+              const combined = [...prev, ...uniqueNew];
+
+              // Check completion logic
+              const completionLog = uniqueNew.find(log =>
+                (log.role === 'System' && (log.message.includes('Workflow complete!') || log.message.includes('Error during execution'))) ||
+                log.message.includes('All tasks completed (Demo)')
+              );
+              if (completionLog) {
+                setIsProcessing(false);
+              }
+
+              // Check code updates
+              const codeLog = uniqueNew.find(log => log.type === 'code');
+              if (codeLog) {
+                setCode(codeLog.message);
+              }
+
+              return combined;
+            });
           }
         }
       } catch (error) {
@@ -49,7 +72,8 @@ function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activityLogs]);
+  }, []); // Empty dependency!
+
 
   const handleRunCode = async () => {
     setOutput("Running...");

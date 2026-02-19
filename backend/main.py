@@ -246,6 +246,7 @@ def run_agents(message: str):
         )
 
         # 2. Coder: Implement the code
+        agent_logger.log("System", "Starting coding phase...", "info")
         coding_task = Task(
             description=(
                 "アーキテクトの設計に基づいて、実際に動作するコードを実装してください。\n\n"
@@ -269,6 +270,7 @@ def run_agents(message: str):
         )
 
         # 3. Tester: Review the code
+        agent_logger.log("System", "Starting testing phase...", "info")
         testing_task = Task(
             description=(
                 "コーダーが作成したコードをレビューしてください。\n\n"
